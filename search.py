@@ -94,11 +94,23 @@ class SearchEngine:
         # Preprocess query
         query_tokens = self.preprocess_text(query)
         
-        # Create query vector
-        query_vector = defaultdict(float)
+        # Create query term frequencies
+        query_tf = defaultdict(int)
         for token in query_tokens:
+            query_tf[token] += 1
+        
+        # Calculate query TF-IDF
+        query_vector = defaultdict(float)
+        num_docs = len(self.documents)
+        for token, freq in query_tf.items():
             if token in self.index:
-                query_vector[token] += 1
+                # Calculate TF (1 + log10(freq))
+                tf = 1 + math.log10(freq) if freq > 0 else 0
+                # Calculate IDF (1 + log10(N/df))
+                df = len(self.index[token])  # number of docs containing the term
+                idf = 1 + math.log10(num_docs / df)
+                # Store TF-IDF score
+                query_vector[token] = tf * idf
 
         # Calculate cosine similarity scores
         scores = {}
@@ -126,7 +138,7 @@ class SearchEngine:
             doc = self.documents[doc_id]
             results.append({
                 'title': doc['title'],
-                'content': doc['content'][:200] + '...',  # Preview
+                'content': doc['content'],
                 'score': f"{score:.4f}",
                 'date': doc['date']
             })
@@ -198,20 +210,26 @@ def test_search():
     test_docs = [
         {
             'id': 'doc1.json',
-            'title': 'Machine Learning Basics',
-            'content': 'Machine learning is a subset of artificial intelligence.',
+            'title': '',
+            'content': 'a b a a',
             'date': '2024-01-01'
         },
         {
             'id': 'doc2.json',
-            'title': 'AI Applications',
-            'content': 'Artificial intelligence has many real-world applications.',
+            'title': '',
+            'content': 'c d b b b',
             'date': '2024-01-02'
         },
         {
             'id': 'doc3.json',
-            'title': 'Data Science',
-            'content': 'Machine learning and data science are related fields.',
+            'title': '',
+            'content': 'b b d d d d d',
+            'date': '2024-01-03'
+        },
+        {
+            'id': 'doc4.json',
+            'title': '',
+            'content': 'a a a a b',
             'date': '2024-01-03'
         }
     ]
@@ -288,7 +306,7 @@ def test_search():
     
     print("\nStep 4: Search Results")
     print("-" * 50)
-    test_query = "machine learning"
+    test_query = "b d"
     print(f"Query: '{test_query}'")
     results = search_engine.search(test_query)
     
@@ -299,5 +317,5 @@ def test_search():
         print(f"Content: {result['content']}")
 
 if __name__ == "__main__":
-    test_search() # for testing
-    # main() # for GUI
+    # test_search() # for testing
+    main() # for GUI
