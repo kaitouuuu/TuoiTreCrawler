@@ -3,15 +3,10 @@ import os
 import math
 import numpy as np
 from typing import Dict, List, Set
-from nltk.tokenize import word_tokenize
-from nltk.stem import PorterStemmer
 from collections import defaultdict
 import tkinter as tk
 from tkinter import ttk, scrolledtext
-import nltk
-
-# Download required NLTK data (only needed for tokenization)
-nltk.download('punkt_tab')
+from pyvi import ViTokenizer
 
 class SearchEngine:
     def __init__(self, data_directory: str, stopwords_file: str):
@@ -19,7 +14,6 @@ class SearchEngine:
         self.documents = {}
         self.index = defaultdict(dict)
         self.document_vectors = {}
-        self.stemmer = PorterStemmer()
         self.stop_words = self.load_stopwords(stopwords_file)
         
     def load_stopwords(self, filepath: str) -> Set[str]:
@@ -34,17 +28,15 @@ class SearchEngine:
             return set()
         
     def preprocess_text(self, text: str) -> List[str]:
-        """Tokenize and remove stop words from text."""
-        # Convert to lowercase and tokenize
-        tokens = word_tokenize(text.lower())
-        # Remove stop words (skip stemming for Vietnamese)
+        """Tokenize and remove stop words from Vietnamese text."""
+        text = ViTokenizer.tokenize(text.lower())
+        tokens = text.split()
         tokens = [token for token in tokens 
-                 if token.isalnum() and token not in self.stop_words]
+                 if token.strip() and token not in self.stop_words]
         return tokens
 
     def build_index(self):
         """Build inverted index and calculate TF-IDF scores."""
-        # First pass: collect term frequencies
         doc_frequencies = defaultdict(int)
         
         for filename in os.listdir(self.data_directory):
@@ -196,7 +188,7 @@ def main():
     # Initialize and build search engine with Vietnamese stopwords
     search_engine = SearchEngine(
         data_directory="data",
-        stopwords_file="vietnamese-stopwords.txt"
+        stopwords_file="vietnamese-stopwords-dash.txt"
     )
     search_engine.build_index()
     
@@ -211,7 +203,7 @@ def test_search():
         {
             'id': 'doc1.json',
             'title': '',
-            'content': 'a b a a',
+            'content': 'a b a a Thủ tướng mong hai bộ trưởng cùng chạy đua marathon để sớm ký FTA với Saudi Arabia',
             'date': '2024-01-01'
         },
         {
@@ -235,7 +227,7 @@ def test_search():
     ]
     
     # Initialize search engine with empty directory (we'll add docs manually)
-    search_engine = SearchEngine("", "vietnamese-stopwords.txt")
+    search_engine = SearchEngine("", "vietnamese-stopwords-dash.txt")
     
     # Manually add documents to the engine
     for doc in test_docs:
@@ -306,7 +298,7 @@ def test_search():
     
     print("\nStep 4: Search Results")
     print("-" * 50)
-    test_query = "b d"
+    test_query = "Thủ tướng mong hai bộ trưởng cùng 'chạy đua marathon' để sớm ký FTA với Saudi Arabia"
     print(f"Query: '{test_query}'")
     results = search_engine.search(test_query)
     
@@ -317,5 +309,5 @@ def test_search():
         print(f"Content: {result['content']}")
 
 if __name__ == "__main__":
-    # test_search() # for testing
-    main() # for GUI
+    test_search() # for testing
+    # main() # for GUI
