@@ -172,3 +172,6 @@ data/
 
 # Ignore the chromedriver executable
 chromedriver.exe
+
+# Ignore the index.json file
+index.json

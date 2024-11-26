@@ -38,14 +38,15 @@ class SearchEngine:
     def build_index(self):
         """Build inverted index and calculate TF-IDF scores."""
         doc_frequencies = defaultdict(int)
+        index_data = defaultdict(lambda: defaultdict(dict))
         
+        # First pass: collect term frequencies
         for filename in os.listdir(self.data_directory):
             if filename.endswith('.json'):
                 with open(os.path.join(self.data_directory, filename), 'r', encoding='utf-8') as f:
                     doc = json.load(f)
                     self.documents[filename] = doc
                     
-                    # Combine title and content for indexing
                     text = f"{doc['title']} {doc['content']}"
                     tokens = self.preprocess_text(text)
                     
@@ -58,27 +59,44 @@ class SearchEngine:
                     for token in set(tokens):
                         doc_frequencies[token] += 1
                         
-                    # Store term frequencies in index
+                    # Store raw term frequencies
                     for token, freq in term_freq.items():
                         self.index[token][filename] = freq
+                        index_data[filename][token]['tf'] = freq
 
-        # Calculate TF-IDF scores
+        # Calculate and store IDF and TF-IDF scores
         num_docs = len(self.documents)
         for term in self.index:
-            # Modified IDF formula: 1 + log10(N/df)
             idf = 1 + math.log10(num_docs / doc_frequencies[term])
+            
             for doc_id in self.index[term]:
-                # Modified TF formula: 1 + log10(frequency)
                 raw_tf = self.index[term][doc_id]
                 tf = 1 + math.log10(raw_tf) if raw_tf > 0 else 0
-                self.index[term][doc_id] = tf * idf
+                tf_idf = tf * idf
+                
+                # Store in main index
+                self.index[term][doc_id] = tf_idf
+                
+                # Store in index_data for JSON
+                index_data[doc_id][term].update({
+                    'tf': tf,
+                    'idf': idf,
+                    'tf_idf': tf_idf
+                })
+
+        # Save index to JSON file
+        try:
+            with open('index.json', 'w', encoding='utf-8') as f:
+                json.dump(index_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Error saving index file: {e}")
 
         # Create document vectors
         for doc_id in self.documents:
             vector = {}
             for term in self.index:
                 if doc_id in self.index[term]:
-                    vector[term] = self.index[term][doc_id] 
+                    vector[term] = self.index[term][doc_id]
             self.document_vectors[doc_id] = vector
 
     def search(self, query: str, top_k: int = 5) -> List[dict]:
@@ -309,5 +327,5 @@ def test_search():
         print(f"Content: {result['content']}")
 
 if __name__ == "__main__":
-    test_search() # for testing
-    # main() # for GUI
+    # test_search() # for testing
+    main() # for GUI
