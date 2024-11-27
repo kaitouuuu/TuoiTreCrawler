@@ -7,6 +7,7 @@ from collections import defaultdict
 import tkinter as tk
 from tkinter import ttk, scrolledtext
 from pyvi import ViTokenizer
+from datetime import datetime
 
 class SearchEngine:
     def __init__(self, data_directory: str, stopwords_file: str):
@@ -99,8 +100,18 @@ class SearchEngine:
                     vector[term] = self.index[term][doc_id]
             self.document_vectors[doc_id] = vector
 
-    def search(self, query: str, top_k: int = 5) -> List[dict]:
-        """Search for documents matching the query."""
+    # Sort function for search results
+    def _get_score(self, doc_score_pair: tuple) -> float:
+        return doc_score_pair[1]
+
+    def search(self, query: str, top_k: int = 5, date_weight: float = 0.3) -> List[dict]:
+        """
+        Search for documents matching the query.
+        Args:
+            query: Search query string
+            top_k: Number of top results to return
+            date_weight: Weight for date score (0 to 1), default 0.3
+        """
         # Preprocess query
         query_tokens = self.preprocess_text(query)
         
@@ -117,17 +128,17 @@ class SearchEngine:
                 # Calculate TF (1 + log10(freq))
                 tf = 1 + math.log10(freq) if freq > 0 else 0
                 # Calculate IDF (1 + log10(N/df))
-                df = len(self.index[token])  # number of docs containing the term
+                df = len(self.index[token])
                 idf = 1 + math.log10(num_docs / df)
                 # Store TF-IDF score
                 query_vector[token] = tf * idf
 
         # Calculate cosine similarity scores
-        scores = {}
+        content_scores = {}
         for doc_id, doc_vector in self.document_vectors.items():
             # Calculate dot product
             dot_product = sum(query_vector[term] * doc_vector.get(term, 0)
-                            for term in query_vector)
+                             for term in query_vector)
             
             # Calculate magnitudes
             query_magnitude = math.sqrt(sum(score ** 2 for score in query_vector.values()))
@@ -135,12 +146,56 @@ class SearchEngine:
             
             # Calculate cosine similarity
             if query_magnitude and doc_magnitude:
-                scores[doc_id] = dot_product / (query_magnitude * doc_magnitude)
+                content_scores[doc_id] = dot_product / (query_magnitude * doc_magnitude)
             else:
-                scores[doc_id] = 0
+                content_scores[doc_id] = 0
 
-        # Sort documents by score
-        ranked_docs = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        # Adding date scores
+        date_scores = {}
+        
+        # Get all valid dates first
+        valid_dates = []
+        for doc in self.documents.values():
+            try:
+                if doc.get('date'):  # Check if date exists and is not None
+                    date_str = doc['date'].split('GMT')[0].strip()
+                    doc_date = datetime.strptime(date_str, '%d/%m/%Y %H:%M')
+                    valid_dates.append(doc_date)
+            except (AttributeError, ValueError) as e:
+                continue
+        
+        # If no valid dates found, use equal weights for all documents
+        if not valid_dates:
+            latest_date = datetime.now()
+            for doc_id in self.documents:
+                date_scores[doc_id] = 1.0
+        else:
+            latest_date = max(valid_dates)
+            
+            # Calculate date scores for each document
+            for doc_id, doc in self.documents.items():
+                try:
+                    if doc.get('date'):
+                        date_str = doc['date'].split('GMT')[0].strip()
+                        doc_date = datetime.strptime(date_str, '%d/%m/%Y %H:%M')
+                        time_diff = (latest_date - doc_date).total_seconds() / (24 * 3600)
+                        date_scores[doc_id] = math.exp(-0.01 * time_diff)
+                    else:
+                        date_scores[doc_id] = 0.0
+                except (AttributeError, ValueError):
+                    date_scores[doc_id] = 0.0
+
+        # Combine scores
+        final_scores = {}
+        for doc_id in self.documents:
+            content_weight = 1 - date_weight
+            final_scores[doc_id] = (
+                content_weight * content_scores[doc_id] + 
+                date_weight * date_scores[doc_id]
+            )
+
+        # Sort documents by combined score using the class method
+        ranked_docs = sorted(final_scores.items(), key=self._get_score, reverse=True)
         
         # Return top K results
         results = []
@@ -150,7 +205,9 @@ class SearchEngine:
                 'title': doc['title'],
                 'content': doc['content'],
                 'score': f"{score:.4f}",
-                'date': doc['date']
+                'date': doc['date'],
+                'content_score': f"{content_scores[doc_id]:.4f}",
+                'date_score': f"{date_scores[doc_id]:.4f}"
             })
         return results
 
@@ -176,14 +233,41 @@ class SearchGUI:
         search_button = ttk.Button(search_frame, text="Search", command=self.perform_search)
         search_button.pack(side=tk.LEFT, padx=5)
         
+        # Add K input field
+        k_frame = ttk.Frame(search_frame)
+        k_frame.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(k_frame, text="Results:").pack(side=tk.LEFT)
+        self.k_var = tk.StringVar(value="5")  # default value
+        k_entry = ttk.Entry(k_frame, textvariable=self.k_var, width=5)
+        k_entry.pack(side=tk.LEFT, padx=2)
+        
+        # Add date weight checkbox
+        self.use_date_weight = tk.BooleanVar(value=False)
+        date_weight_cb = ttk.Checkbutton(
+            search_frame, 
+            text="Consider Recent Date",
+            variable=self.use_date_weight
+        )
+        date_weight_cb.pack(side=tk.LEFT, padx=5)
+        
         # Create results area
         self.results_area = scrolledtext.ScrolledText(self.window, wrap=tk.WORD, width=80, height=30)
         self.results_area.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
 
     def perform_search(self):
         query = self.search_var.get()
+        try:
+            k = int(self.k_var.get())
+            if k < 1:
+                k = 1
+        except ValueError:
+            k = 5
+            
         if query.strip():
-            results = self.search_engine.search(query)
+            # Use date weight 0.3 if checkbox is selected, 0.0 if not
+            date_weight = 0.3 if self.use_date_weight.get() else 0.0
+            results = self.search_engine.search(query, top_k=k, date_weight=date_weight)
             self.display_results(results)
         
     def display_results(self, results: List[dict]):
@@ -194,7 +278,13 @@ class SearchGUI:
         
         for i, result in enumerate(results, 1):
             self.results_area.insert(tk.END, f"\n{i}. {result['title']}\n")
-            self.results_area.insert(tk.END, f"Score: {result['score']}\n")
+            self.results_area.insert(tk.END, f"Final Score: {result['score']}\n")
+            
+            # Only show component scores if date weighting is enabled
+            if self.use_date_weight.get():
+                self.results_area.insert(tk.END, f"Content Score: {result['content_score']}\n")
+                self.results_area.insert(tk.END, f"Date Score: {result['date_score']}\n")
+                
             self.results_area.insert(tk.END, f"Date: {result['date']}\n")
             self.results_area.insert(tk.END, f"{result['content']}\n")
             self.results_area.insert(tk.END, "-" * 80 + "\n")
